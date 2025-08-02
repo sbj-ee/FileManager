@@ -53,5 +53,3 @@ Notes
 Permissions: Ensure the script has read/write permissions for the target directory and files.
 Testing: Test the script in a non-critical environment first to verify behavior.
 Customization: You can extend the script to delete compressed files older than a certain period or add size-based checks by modifying the manage_files function.
-
-If you need additional features (e.g., recursive directory scanning, size limits, or deletion of old compressed files), let me know, and I can modify the script accordingly!How can Grok help?
