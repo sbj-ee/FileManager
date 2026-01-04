@@ -1,55 +1,101 @@
 # FileManager
 
-How the Script Works
+A log rotation utility that compresses old files using gzip. Scans a directory for files older than a specified threshold, compresses them, and removes the originals.
 
-Purpose: This script scans a specified directory for files older than 5 days, compresses them using gzip, and removes the original files to save disk space, mimicking logrotate functionality.
-Key Features:
+## Features
 
-File Age Check: Identifies files older than 5 days based on their last modification time.
-Compression: Compresses eligible files using gzip, appending .gz to the filename.
-Original File Removal: Deletes the original file after successful compression.
-Logging: Logs all actions (successes and failures) to a file (file_manager.log) and the console for monitoring.
-Error Handling: Gracefully handles errors during file processing or compression.
+- **Age-based compression**: Compress files older than N days (default: 5)
+- **Gzip compression**: Creates `.gz` files and removes originals
+- **Dry-run mode**: Preview what would be compressed without making changes
+- **Recursive mode**: Optionally process subdirectories
+- **Statistics**: Reports files scanned, compressed, skipped, and bytes saved
+- **Safe operation**: Verifies compression before deleting originals
+- **Zero dependencies**: Uses only Python standard library
 
+## Installation
 
-Dependencies:
+```bash
+git clone https://github.com/sbj-ee/FileManager.git
+cd FileManager
+```
 
-Uses standard Python libraries: os, gzip, time, datetime, pathlib, and logging.
-No external packages required.
+## Usage
 
+```bash
+# Compress files older than 5 days (default)
+python file_manager.py /var/log/myapp
 
-Configuration:
+# Compress files older than 7 days
+python file_manager.py /var/log/myapp -d 7
 
-Modify the target_directory variable in the main() function to point to the directory containing the files you want to manage (e.g., /var/log/myapp).
-Adjust the days parameter in the manage_files() function if you want a different age threshold.
+# Preview what would be compressed (dry-run)
+python file_manager.py /var/log/myapp --dry-run
 
+# Include subdirectories
+python file_manager.py /var/log/myapp -r
 
-Usage:
+# Verbose output with log file
+python file_manager.py /var/log/myapp -v -l /var/log/file_manager.log
+```
 
-Save the script (e.g., as file_manager.py).
-Make it executable: chmod +x file_manager.py.
-Run it manually: ./file_manager.py.
-Schedule it to run periodically (e.g., daily) using a cron job:
-bash0 0 * * * /usr/bin/python3 /path/to/file_manager.py
+## CLI Options
 
+| Option | Description |
+|--------|-------------|
+| `directory` | Directory to scan for files (required) |
+| `-d`, `--days` | Compress files older than this many days (default: 5) |
+| `-r`, `--recursive` | Process subdirectories recursively |
+| `-n`, `--dry-run` | Show what would be done without making changes |
+| `-l`, `--log-file` | Path to log file (default: console only) |
+| `-v`, `--verbose` | Enable verbose/debug output |
 
+## Examples
 
-Safety Features:
+```bash
+$ python file_manager.py /var/log/myapp --dry-run
+2024-01-15 10:30:00 - INFO - === DRY RUN MODE - No changes will be made ===
+2024-01-15 10:30:00 - INFO - Starting file management: /var/log/myapp
+2024-01-15 10:30:00 - INFO - Compressing files older than 5 days
+2024-01-15 10:30:00 - INFO - [DRY-RUN] Would compress: app.log.1 -> app.log.1.gz
+2024-01-15 10:30:00 - INFO - [DRY-RUN] Would compress: app.log.2 -> app.log.2.gz
+2024-01-15 10:30:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, Failed: 0, Bytes saved: 0
 
-Skips already compressed files (.gz extension).
-Checks if the directory exists before processing.
-Logs errors for troubleshooting without interrupting the process.
+$ python file_manager.py /var/log/myapp
+2024-01-15 10:31:00 - INFO - Starting file management: /var/log/myapp
+2024-01-15 10:31:00 - INFO - Compressing files older than 5 days
+2024-01-15 10:31:00 - INFO - Compressed: app.log.1 -> app.log.1.gz (saved 15,234 bytes)
+2024-01-15 10:31:00 - INFO - Compressed: app.log.2 -> app.log.2.gz (saved 12,456 bytes)
+2024-01-15 10:31:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, Failed: 0, Bytes saved: 27,690
+```
 
+## Scheduling with Cron
 
-Limitations:
+Run daily at midnight:
 
-Only compresses files directly in the specified directory (not subdirectories). To include subdirectories, modify the glob pattern to **/* and add recursive=True.
-Does not implement advanced logrotate features like size-based rotation or post-rotation scripts.
+```bash
+0 0 * * * /usr/bin/python3 /path/to/file_manager.py /var/log/myapp -l /var/log/file_manager.log
+```
 
+## Safety Features
 
+- **Skips .gz files**: Won't try to compress already-compressed files
+- **Verifies compression**: Checks compressed file exists and is non-empty before deleting original
+- **Cleans up on failure**: Removes partial compressed files if compression fails
+- **Dry-run mode**: Test before running for real
+- **Error handling**: Continues processing other files if one fails
 
-Notes
+## Running Tests
 
-Permissions: Ensure the script has read/write permissions for the target directory and files.
-Testing: Test the script in a non-critical environment first to verify behavior.
-Customization: You can extend the script to delete compressed files older than a certain period or add size-based checks by modifying the manage_files function.
+```bash
+pip install pytest
+pytest test_file_manager.py -v
+```
+
+## Requirements
+
+- Python 3.10+
+- pytest (for running tests only)
+
+## License
+
+MIT
