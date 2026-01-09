@@ -10,7 +10,7 @@ A log rotation utility that compresses old files using gzip. Scans a directory f
 - **Recursive mode**: Optionally process subdirectories
 - **Statistics**: Reports files scanned, compressed, skipped, and bytes saved
 - **Safe operation**: Verifies compression before deleting originals
-- **Zero dependencies**: Uses only Python standard library
+- **Zero external dependencies**: Uses only Python standard library (pytest for testing only)
 
 ## Installation
 
