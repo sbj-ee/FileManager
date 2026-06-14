@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filemanager-logrotate"
+version = "0.1.0"
+description = "A log rotation utility that compresses old files using gzip."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "sbj-ee" }]
+keywords = ["log", "rotation", "gzip", "compression", "cleanup"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Logging",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sbj-ee/FileManager"
+Repository = "https://github.com/sbj-ee/FileManager"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+file-manager = "file_manager:main"
+
+[tool.setuptools]
+py-modules = ["file_manager"]
