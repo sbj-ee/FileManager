@@ -137,6 +137,21 @@ class TestCompressFile:
 
         assert (temp_dir / "test.txt.gz").exists()
 
+    def test_compress_preserves_metadata(self, temp_dir):
+        """Compressed file should inherit the original's mode and mtime."""
+        file_path = temp_dir / "test.log"
+        file_path.write_text("Test content for compression" * 100)
+        os.chmod(file_path, 0o640)
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        os.utime(file_path, (old_time, old_time))
+
+        compress_file(file_path)
+
+        compressed_path = temp_dir / "test.log.gz"
+        stat = compressed_path.stat()
+        assert (stat.st_mode & 0o777) == 0o640
+        assert stat.st_mtime == pytest.approx(old_time, abs=1)
+
 
 class TestManageFiles:
     """Tests for manage_files function."""
@@ -224,6 +239,25 @@ class TestManageFiles:
         stats = manage_files(temp_dir, days=5, recursive=True)
         assert stats.files_scanned == 1
         assert stats.files_compressed == 1
+
+    def test_skip_symlinks(self, temp_dir):
+        """Should skip symlinks rather than compressing their targets."""
+        target = temp_dir / "real.log"
+        target.write_text("Real content")
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        os.utime(target, (old_time, old_time))
+
+        link = temp_dir / "link.log"
+        link.symlink_to(target)
+        os.utime(link, (old_time, old_time), follow_symlinks=False)
+
+        stats = manage_files(temp_dir, days=5)
+
+        # Only the real file is scanned/compressed; the symlink is skipped.
+        assert stats.files_scanned == 1
+        assert stats.files_compressed == 1
+        assert link.is_symlink()
+        assert not (temp_dir / "link.log.gz").exists()
 
     def test_custom_days_threshold(self, temp_dir):
         """Should respect custom days threshold."""

@@ -88,6 +88,10 @@ def compress_file(file_path: Path, dry_run: bool = False) -> tuple[bool, int]:
             compressed_path.unlink()
             raise IOError("Compressed file is empty")
 
+        # Preserve original metadata (mode, mtime, etc.) on the compressed file
+        # so permissions and age-based handling carry over.
+        shutil.copystat(file_path, compressed_path)
+
         # Remove original file after successful compression
         file_path.unlink()
         bytes_saved = original_size - compressed_size
@@ -146,6 +150,12 @@ def manage_files(
     pattern = "**/*" if recursive else "*"
 
     for file_path in dir_path.glob(pattern):
+        # Skip symlinks to avoid compressing files outside the tree,
+        # following dangling links, or recursing through linked directories.
+        if file_path.is_symlink():
+            logging.debug(f"Skipped (symlink): {file_path}")
+            continue
+
         if not file_path.is_file():
             continue
 

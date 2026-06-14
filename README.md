@@ -79,6 +79,8 @@ Run daily at midnight:
 ## Safety Features
 
 - **Skips .gz files**: Won't try to compress already-compressed files
+- **Skips symlinks**: Won't follow links out of the tree or recurse through linked directories
+- **Preserves metadata**: Compressed file inherits the original's permissions and modification time
 - **Verifies compression**: Checks compressed file exists and is non-empty before deleting original
 - **Cleans up on failure**: Removes partial compressed files if compression fails
 - **Dry-run mode**: Test before running for real
