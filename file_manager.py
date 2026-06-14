@@ -11,7 +11,16 @@ import logging
 import shutil
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+
+
+class CompressResult(Enum):
+    """Outcome of attempting to compress a single file."""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    IN_USE = "in_use"
 
 
 @dataclass
@@ -22,6 +31,7 @@ class ProcessingStats:
     files_compressed: int = 0
     files_skipped: int = 0
     files_failed: int = 0
+    files_in_use: int = 0
     bytes_saved: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -30,6 +40,7 @@ class ProcessingStats:
             f"Scanned: {self.files_scanned}, "
             f"Compressed: {self.files_compressed}, "
             f"Skipped: {self.files_skipped}, "
+            f"In use: {self.files_in_use}, "
             f"Failed: {self.files_failed}, "
             f"Bytes saved: {self.bytes_saved:,}"
         )
@@ -57,8 +68,12 @@ def setup_logging(log_file: str | None = None, verbose: bool = False) -> None:
 
 def compress_file(
     file_path: Path, dry_run: bool = False, compresslevel: int = 9
-) -> tuple[bool, int]:
+) -> tuple[CompressResult, int]:
     """Compress a single file using gzip.
+
+    To avoid corrupting or losing data from a file that is still being
+    written, the original's size and mtime are re-checked after compression;
+    if they changed during the copy the original is left untouched.
 
     Args:
         file_path: Path to the file to compress.
@@ -66,16 +81,17 @@ def compress_file(
         compresslevel: gzip compression level (1=fastest, 9=best, default: 9).
 
     Returns:
-        Tuple of (success: bool, bytes_saved: int)
+        Tuple of (result: CompressResult, bytes_saved: int)
     """
     compressed_path = file_path.with_suffix(file_path.suffix + ".gz")
 
     if dry_run:
         logging.info(f"[DRY-RUN] Would compress: {file_path} -> {compressed_path}")
-        return True, 0
+        return CompressResult.SUCCESS, 0
 
     try:
-        original_size = file_path.stat().st_size
+        stat_before = file_path.stat()
+        original_size = stat_before.st_size
 
         # Compress file using shutil for memory efficiency
         with open(file_path, "rb") as f_in:
@@ -91,6 +107,20 @@ def compress_file(
             compressed_path.unlink()
             raise IOError("Compressed file is empty")
 
+        # Active-file safety: if the original changed while we were reading it,
+        # our compressed copy may be torn. Discard it and keep the original so a
+        # live writer doesn't lose data to an unlinked inode.
+        stat_after = file_path.stat()
+        if (
+            stat_after.st_mtime_ns != stat_before.st_mtime_ns
+            or stat_after.st_size != original_size
+        ):
+            logging.warning(
+                f"Skipped (modified during compression): {file_path}"
+            )
+            compressed_path.unlink()
+            return CompressResult.IN_USE, 0
+
         # Preserve original metadata (mode, mtime, etc.) on the compressed file
         # so permissions and age-based handling carry over.
         shutil.copystat(file_path, compressed_path)
@@ -103,7 +133,7 @@ def compress_file(
             f"Compressed: {file_path} -> {compressed_path} "
             f"(saved {bytes_saved:,} bytes)"
         )
-        return True, bytes_saved
+        return CompressResult.SUCCESS, bytes_saved
 
     except Exception as e:
         logging.error(f"Failed to compress {file_path}: {e}")
@@ -113,7 +143,7 @@ def compress_file(
                 compressed_path.unlink()
             except OSError:
                 pass
-        return False, 0
+        return CompressResult.FAILED, 0
 
 
 def manage_files(
@@ -123,6 +153,7 @@ def manage_files(
     recursive: bool = False,
     pattern: str = "*",
     compresslevel: int = 9,
+    min_size: int = 0,
 ) -> ProcessingStats:
     """Scan directory and compress files older than specified days.
 
@@ -133,6 +164,7 @@ def manage_files(
         recursive: If True, process subdirectories.
         pattern: Glob pattern selecting which files to consider (default: "*").
         compresslevel: gzip compression level (1=fastest, 9=best, default: 9).
+        min_size: Skip files smaller than this many bytes (default: 0).
 
     Returns:
         ProcessingStats with results of the operation.
@@ -173,16 +205,21 @@ def manage_files(
         stats.files_scanned += 1
 
         try:
-            mtime = file_path.stat().st_mtime
-            file_age = current_time - mtime
+            file_stat = file_path.stat()
+            file_age = current_time - file_stat.st_mtime
 
-            if file_age > age_threshold:
-                success, bytes_saved = compress_file(
+            if file_stat.st_size < min_size:
+                stats.files_skipped += 1
+                logging.debug(f"Skipped (smaller than min-size): {file_path}")
+            elif file_age > age_threshold:
+                result, bytes_saved = compress_file(
                     file_path, dry_run, compresslevel
                 )
-                if success:
+                if result is CompressResult.SUCCESS:
                     stats.files_compressed += 1
                     stats.bytes_saved += bytes_saved
+                elif result is CompressResult.IN_USE:
+                    stats.files_in_use += 1
                 else:
                     stats.files_failed += 1
                     stats.errors.append(f"Failed to compress: {file_path}")
@@ -240,6 +277,36 @@ def compression_level(value: str) -> int:
     return parsed
 
 
+def human_size(value: str) -> int:
+    """Argparse type for a non-negative size with an optional K/M/G suffix.
+
+    Examples: "0", "512", "10K", "5M", "1G" (suffixes are powers of 1024).
+
+    Args:
+        value: Raw command line argument value.
+
+    Returns:
+        The size in bytes.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value cannot be parsed as a
+            non-negative size.
+    """
+    multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    text = value.strip().upper()
+    if text[-1:] in multipliers:
+        number, multiplier = text[:-1], multipliers[text[-1]]
+    else:
+        number, multiplier = text, 1
+    try:
+        parsed = int(number)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid size value: {value!r}")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"must be non-negative, got {value!r}")
+    return parsed * multiplier
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -253,6 +320,7 @@ Examples:
   %(prog)s /var/log/myapp -r           # Include subdirectories
   %(prog)s /var/log/myapp -p '*.log'   # Only files matching the pattern
   %(prog)s /var/log/myapp -c 1         # Fastest compression
+  %(prog)s /var/log/myapp -m 4K        # Skip files smaller than 4 KiB
         """,
     )
     parser.add_argument(
@@ -280,6 +348,14 @@ Examples:
         type=compression_level,
         default=9,
         help="gzip compression level, 1=fastest to 9=best (default: 9)",
+    )
+    parser.add_argument(
+        "-m", "--min-size",
+        type=human_size,
+        default=0,
+        metavar="BYTES",
+        help="Skip files smaller than this size; accepts K/M/G suffixes "
+             "(default: 0, no minimum)",
     )
     parser.add_argument(
         "-n", "--dry-run",
@@ -321,6 +397,7 @@ def main() -> int:
         recursive=args.recursive,
         pattern=args.pattern,
         compresslevel=args.compresslevel,
+        min_size=args.min_size,
     )
 
     logging.info(f"Completed: {stats}")

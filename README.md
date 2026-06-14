@@ -48,6 +48,9 @@ python file_manager.py /var/log/myapp -p '*.log'
 # Use the fastest compression level (1) instead of best (9)
 python file_manager.py /var/log/myapp -c 1
 
+# Skip files smaller than 4 KiB (suffixes K/M/G accepted)
+python file_manager.py /var/log/myapp -m 4K
+
 # Verbose output with log file
 python file_manager.py /var/log/myapp -v -l /var/log/file_manager.log
 ```
@@ -61,6 +64,7 @@ python file_manager.py /var/log/myapp -v -l /var/log/file_manager.log
 | `-r`, `--recursive` | Process subdirectories recursively |
 | `-p`, `--pattern` | Glob pattern selecting which files to consider (default: `*`) |
 | `-c`, `--compresslevel` | gzip compression level, 1=fastest to 9=best (default: 9) |
+| `-m`, `--min-size` | Skip files smaller than this size; accepts K/M/G suffixes (default: 0) |
 | `-n`, `--dry-run` | Show what would be done without making changes |
 | `-l`, `--log-file` | Path to log file (default: console only) |
 | `-v`, `--verbose` | Enable verbose/debug output |
@@ -74,14 +78,14 @@ $ python file_manager.py /var/log/myapp --dry-run
 2024-01-15 10:30:00 - INFO - Compressing files older than 5 days
 2024-01-15 10:30:00 - INFO - [DRY-RUN] Would compress: app.log.1 -> app.log.1.gz
 2024-01-15 10:30:00 - INFO - [DRY-RUN] Would compress: app.log.2 -> app.log.2.gz
-2024-01-15 10:30:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, Failed: 0, Bytes saved: 0
+2024-01-15 10:30:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, In use: 0, Failed: 0, Bytes saved: 0
 
 $ python file_manager.py /var/log/myapp
 2024-01-15 10:31:00 - INFO - Starting file management: /var/log/myapp
 2024-01-15 10:31:00 - INFO - Compressing files older than 5 days
 2024-01-15 10:31:00 - INFO - Compressed: app.log.1 -> app.log.1.gz (saved 15,234 bytes)
 2024-01-15 10:31:00 - INFO - Compressed: app.log.2 -> app.log.2.gz (saved 12,456 bytes)
-2024-01-15 10:31:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, Failed: 0, Bytes saved: 27,690
+2024-01-15 10:31:00 - INFO - Completed: Scanned: 2, Compressed: 2, Skipped: 0, In use: 0, Failed: 0, Bytes saved: 27,690
 ```
 
 ## Scheduling with Cron
@@ -97,6 +101,7 @@ Run daily at midnight:
 - **Skips .gz files**: Won't try to compress already-compressed files
 - **Skips symlinks**: Won't follow links out of the tree or recurse through linked directories
 - **Preserves metadata**: Compressed file inherits the original's permissions and modification time
+- **Active-file safety**: Re-checks the original's size and mtime after compressing; if it changed mid-copy (e.g. a live writer is appending), the original is left untouched rather than replaced with a torn snapshot
 - **Verifies compression**: Checks compressed file exists and is non-empty before deleting original
 - **Cleans up on failure**: Removes partial compressed files if compression fails
 - **Dry-run mode**: Test before running for real
