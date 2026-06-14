@@ -17,13 +17,21 @@ A log rotation utility that compresses old files using gzip. Scans a directory f
 ```bash
 git clone https://github.com/sbj-ee/FileManager.git
 cd FileManager
+pip install .
 ```
+
+Installing exposes a `file-manager` console command. You can also run the
+script directly without installing via `python file_manager.py`.
 
 ## Usage
 
+After installing, use the `file-manager` command (shown below). The same
+options work with `python file_manager.py` if you prefer to run the script
+directly.
+
 ```bash
 # Compress files older than 5 days (default)
-python file_manager.py /var/log/myapp
+file-manager /var/log/myapp
 
 # Compress files older than 7 days
 python file_manager.py /var/log/myapp -d 7

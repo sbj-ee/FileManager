@@ -4,3 +4,8 @@ __pycache__/
 *.log
 *.gz
 .env
+
+# Packaging build artifacts
+build/
+dist/
+*.egg-info/
