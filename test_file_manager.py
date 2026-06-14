@@ -1,5 +1,6 @@
 """Tests for file_manager.py"""
 
+import argparse
 import gzip
 import logging
 import os
@@ -14,6 +15,7 @@ from file_manager import (
     ProcessingStats,
     compress_file,
     manage_files,
+    non_negative_int,
     setup_logging,
 )
 
@@ -303,6 +305,25 @@ class TestSetupLogging:
         assert log_file.exists()
 
 
+class TestNonNegativeInt:
+    """Tests for the non_negative_int argparse type."""
+
+    def test_accepts_zero_and_positive(self):
+        """Should accept zero and positive integers."""
+        assert non_negative_int("0") == 0
+        assert non_negative_int("7") == 7
+
+    def test_rejects_negative(self):
+        """Should reject negative integers."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            non_negative_int("-1")
+
+    def test_rejects_non_integer(self):
+        """Should reject non-integer values."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            non_negative_int("abc")
+
+
 class TestCLI:
     """Tests for command line interface."""
 
@@ -355,6 +376,20 @@ class TestCLI:
             cwd=str(Path(__file__).parent),
         )
         assert result.returncode == 1
+
+    def test_cli_negative_days(self, temp_dir):
+        """CLI should reject a negative --days value."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "file_manager.py", str(temp_dir), "-d", "-1"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent),
+        )
+        assert result.returncode == 2  # argparse usage error
+        assert "non-negative" in result.stderr
 
 
 if __name__ == "__main__":

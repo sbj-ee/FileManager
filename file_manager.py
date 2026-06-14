@@ -189,6 +189,27 @@ def manage_files(
     return stats
 
 
+def non_negative_int(value: str) -> int:
+    """Argparse type for a non-negative integer.
+
+    Args:
+        value: Raw command line argument value.
+
+    Returns:
+        The parsed integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a non-negative integer.
+    """
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"must be non-negative, got {parsed}")
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -208,7 +229,7 @@ Examples:
     )
     parser.add_argument(
         "-d", "--days",
-        type=int,
+        type=non_negative_int,
         default=5,
         help="Compress files older than this many days (default: 5)",
     )
