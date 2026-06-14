@@ -4,6 +4,7 @@ import argparse
 import gzip
 import logging
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -12,9 +13,11 @@ from unittest.mock import patch
 import pytest
 
 from file_manager import (
+    CompressResult,
     ProcessingStats,
     compress_file,
     compression_level,
+    human_size,
     manage_files,
     non_negative_int,
     setup_logging,
@@ -60,6 +63,7 @@ class TestProcessingStats:
         assert stats.files_compressed == 0
         assert stats.files_skipped == 0
         assert stats.files_failed == 0
+        assert stats.files_in_use == 0
         assert stats.bytes_saved == 0
         assert stats.errors == []
 
@@ -90,9 +94,9 @@ class TestCompressFile:
         file_path.write_text(content)
         original_size = file_path.stat().st_size
 
-        success, bytes_saved = compress_file(file_path)
+        result, bytes_saved = compress_file(file_path)
 
-        assert success is True
+        assert result is CompressResult.SUCCESS
         assert not file_path.exists()
         assert (temp_dir / "test.log.gz").exists()
         assert bytes_saved > 0
@@ -116,9 +120,9 @@ class TestCompressFile:
         content = "Test content for compression" * 100
         file_path.write_text(content)
 
-        success, _ = compress_file(file_path, compresslevel=1)
+        result, _ = compress_file(file_path, compresslevel=1)
 
-        assert success is True
+        assert result is CompressResult.SUCCESS
         compressed_path = temp_dir / "test.log.gz"
         with gzip.open(compressed_path, "rt") as f:
             assert f.read() == content
@@ -128,9 +132,9 @@ class TestCompressFile:
         file_path = temp_dir / "test.log"
         file_path.write_text("Test content")
 
-        success, bytes_saved = compress_file(file_path, dry_run=True)
+        result, bytes_saved = compress_file(file_path, dry_run=True)
 
-        assert success is True
+        assert result is CompressResult.SUCCESS
         assert bytes_saved == 0
         assert file_path.exists()
         assert not (temp_dir / "test.log.gz").exists()
@@ -139,9 +143,9 @@ class TestCompressFile:
         """Should handle nonexistent file gracefully."""
         file_path = temp_dir / "nonexistent.log"
 
-        success, bytes_saved = compress_file(file_path)
+        result, bytes_saved = compress_file(file_path)
 
-        assert success is False
+        assert result is CompressResult.FAILED
         assert bytes_saved == 0
 
     def test_compress_preserves_extension(self, temp_dir):
@@ -167,6 +171,31 @@ class TestCompressFile:
         stat = compressed_path.stat()
         assert (stat.st_mode & 0o777) == 0o640
         assert stat.st_mtime == pytest.approx(old_time, abs=1)
+
+    def test_compress_file_modified_during_copy(self, temp_dir):
+        """Should not delete the original if it changes while being read."""
+        file_path = temp_dir / "active.log"
+        file_path.write_text("initial content " * 100)
+
+        real_copy = shutil.copyfileobj
+
+        def copy_then_modify(f_in, f_out, *args, **kwargs):
+            # Perform the real copy, then simulate a live writer appending.
+            real_copy(f_in, f_out)
+            with open(file_path, "a") as f:
+                f.write("appended by another writer")
+            future = time.time() + 10
+            os.utime(file_path, (future, future))
+
+        with patch(
+            "file_manager.shutil.copyfileobj", side_effect=copy_then_modify
+        ):
+            result, bytes_saved = compress_file(file_path)
+
+        assert result is CompressResult.IN_USE
+        assert bytes_saved == 0
+        assert file_path.exists()  # original preserved
+        assert not (temp_dir / "active.log.gz").exists()  # partial removed
 
 
 class TestManageFiles:
@@ -306,6 +335,37 @@ class TestManageFiles:
         assert stats.files_compressed == 2
         assert (subdir / "other.txt").exists()
 
+    def test_min_size_filter(self, temp_dir):
+        """Should skip files smaller than min_size."""
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        small = temp_dir / "small.log"
+        small.write_text("hi")
+        os.utime(small, (old_time, old_time))
+        big = temp_dir / "big.log"
+        big.write_text("x" * 500)
+        os.utime(big, (old_time, old_time))
+
+        stats = manage_files(temp_dir, days=5, min_size=100)
+
+        assert stats.files_scanned == 2
+        assert stats.files_compressed == 1
+        assert stats.files_skipped == 1
+        assert small.exists()
+        assert (temp_dir / "big.log.gz").exists()
+
+    def test_in_use_counted_separately(self, temp_dir, old_file):
+        """A file modified mid-compression should count as in_use, not failed."""
+        with patch(
+            "file_manager.compress_file",
+            return_value=(CompressResult.IN_USE, 0),
+        ):
+            stats = manage_files(temp_dir, days=5)
+
+        assert stats.files_in_use == 1
+        assert stats.files_failed == 0
+        assert stats.files_compressed == 0
+        assert not stats.errors
+
     def test_custom_days_threshold(self, temp_dir):
         """Should respect custom days threshold."""
         file_path = temp_dir / "test.log"
@@ -387,6 +447,35 @@ class TestCompressionLevel:
         """Should reject non-integer values."""
         with pytest.raises(argparse.ArgumentTypeError):
             compression_level("abc")
+
+
+class TestHumanSize:
+    """Tests for the human_size argparse type."""
+
+    def test_plain_bytes(self):
+        """Should parse plain byte counts."""
+        assert human_size("0") == 0
+        assert human_size("512") == 512
+
+    def test_suffixes(self):
+        """Should apply K/M/G multipliers (powers of 1024)."""
+        assert human_size("1K") == 1024
+        assert human_size("2M") == 2 * 1024**2
+        assert human_size("1G") == 1024**3
+
+    def test_lowercase_suffix(self):
+        """Should accept lowercase suffixes."""
+        assert human_size("4k") == 4096
+
+    def test_rejects_negative(self):
+        """Should reject negative sizes."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            human_size("-1")
+
+    def test_rejects_invalid(self):
+        """Should reject unparseable values."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            human_size("abc")
 
 
 class TestCLI:
