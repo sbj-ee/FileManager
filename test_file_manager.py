@@ -14,6 +14,7 @@ import pytest
 from file_manager import (
     ProcessingStats,
     compress_file,
+    compression_level,
     manage_files,
     non_negative_int,
     setup_logging,
@@ -108,6 +109,19 @@ class TestCompressFile:
         with gzip.open(compressed_path, "rt") as f:
             decompressed = f.read()
         assert decompressed == content
+
+    def test_compress_file_respects_level(self, temp_dir):
+        """Should produce a valid gzip regardless of compression level."""
+        file_path = temp_dir / "test.log"
+        content = "Test content for compression" * 100
+        file_path.write_text(content)
+
+        success, _ = compress_file(file_path, compresslevel=1)
+
+        assert success is True
+        compressed_path = temp_dir / "test.log.gz"
+        with gzip.open(compressed_path, "rt") as f:
+            assert f.read() == content
 
     def test_compress_file_dry_run(self, temp_dir):
         """Dry run should not modify files."""
@@ -261,6 +275,37 @@ class TestManageFiles:
         assert link.is_symlink()
         assert not (temp_dir / "link.log.gz").exists()
 
+    def test_pattern_filter(self, temp_dir):
+        """Should only consider files matching the pattern."""
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        for name in ("keep.log", "skip.txt"):
+            f = temp_dir / name
+            f.write_text("content")
+            os.utime(f, (old_time, old_time))
+
+        stats = manage_files(temp_dir, days=5, pattern="*.log")
+
+        assert stats.files_scanned == 1
+        assert stats.files_compressed == 1
+        assert (temp_dir / "keep.log.gz").exists()
+        assert (temp_dir / "skip.txt").exists()
+        assert not (temp_dir / "skip.txt.gz").exists()
+
+    def test_pattern_filter_recursive(self, temp_dir):
+        """Pattern should apply at every level when recursive."""
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        subdir = temp_dir / "sub"
+        subdir.mkdir()
+        for f in (temp_dir / "top.log", subdir / "nested.log", subdir / "other.txt"):
+            f.write_text("content")
+            os.utime(f, (old_time, old_time))
+
+        stats = manage_files(temp_dir, days=5, pattern="*.log", recursive=True)
+
+        assert stats.files_scanned == 2
+        assert stats.files_compressed == 2
+        assert (subdir / "other.txt").exists()
+
     def test_custom_days_threshold(self, temp_dir):
         """Should respect custom days threshold."""
         file_path = temp_dir / "test.log"
@@ -322,6 +367,26 @@ class TestNonNegativeInt:
         """Should reject non-integer values."""
         with pytest.raises(argparse.ArgumentTypeError):
             non_negative_int("abc")
+
+
+class TestCompressionLevel:
+    """Tests for the compression_level argparse type."""
+
+    def test_accepts_valid_range(self):
+        """Should accept levels 1 through 9."""
+        assert compression_level("1") == 1
+        assert compression_level("9") == 9
+
+    @pytest.mark.parametrize("value", ["0", "10", "-1"])
+    def test_rejects_out_of_range(self, value):
+        """Should reject levels outside 1-9."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            compression_level(value)
+
+    def test_rejects_non_integer(self):
+        """Should reject non-integer values."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            compression_level("abc")
 
 
 class TestCLI:
