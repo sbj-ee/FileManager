@@ -55,12 +55,15 @@ def setup_logging(log_file: str | None = None, verbose: bool = False) -> None:
     )
 
 
-def compress_file(file_path: Path, dry_run: bool = False) -> tuple[bool, int]:
+def compress_file(
+    file_path: Path, dry_run: bool = False, compresslevel: int = 9
+) -> tuple[bool, int]:
     """Compress a single file using gzip.
 
     Args:
         file_path: Path to the file to compress.
         dry_run: If True, simulate compression without making changes.
+        compresslevel: gzip compression level (1=fastest, 9=best, default: 9).
 
     Returns:
         Tuple of (success: bool, bytes_saved: int)
@@ -76,7 +79,7 @@ def compress_file(file_path: Path, dry_run: bool = False) -> tuple[bool, int]:
 
         # Compress file using shutil for memory efficiency
         with open(file_path, "rb") as f_in:
-            with gzip.open(compressed_path, "wb") as f_out:
+            with gzip.open(compressed_path, "wb", compresslevel=compresslevel) as f_out:
                 shutil.copyfileobj(f_in, f_out)
 
         # Verify compressed file exists and is valid
@@ -118,6 +121,8 @@ def manage_files(
     days: int = 5,
     dry_run: bool = False,
     recursive: bool = False,
+    pattern: str = "*",
+    compresslevel: int = 9,
 ) -> ProcessingStats:
     """Scan directory and compress files older than specified days.
 
@@ -126,6 +131,8 @@ def manage_files(
         days: Compress files older than this many days.
         dry_run: If True, simulate without making changes.
         recursive: If True, process subdirectories.
+        pattern: Glob pattern selecting which files to consider (default: "*").
+        compresslevel: gzip compression level (1=fastest, 9=best, default: 9).
 
     Returns:
         ProcessingStats with results of the operation.
@@ -146,10 +153,10 @@ def manage_files(
         stats.errors.append(f"Path is not a directory: {directory}")
         return stats
 
-    # Choose glob pattern based on recursive flag
-    pattern = "**/*" if recursive else "*"
+    # Apply the pattern at every level when recursing, else only the top level.
+    glob_pattern = f"**/{pattern}" if recursive else pattern
 
-    for file_path in dir_path.glob(pattern):
+    for file_path in dir_path.glob(glob_pattern):
         # Skip symlinks to avoid compressing files outside the tree,
         # following dangling links, or recursing through linked directories.
         if file_path.is_symlink():
@@ -170,7 +177,9 @@ def manage_files(
             file_age = current_time - mtime
 
             if file_age > age_threshold:
-                success, bytes_saved = compress_file(file_path, dry_run)
+                success, bytes_saved = compress_file(
+                    file_path, dry_run, compresslevel
+                )
                 if success:
                     stats.files_compressed += 1
                     stats.bytes_saved += bytes_saved
@@ -210,6 +219,27 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
+def compression_level(value: str) -> int:
+    """Argparse type for a gzip compression level (1-9).
+
+    Args:
+        value: Raw command line argument value.
+
+    Returns:
+        The parsed integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not an integer in 1-9.
+    """
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}")
+    if not 1 <= parsed <= 9:
+        raise argparse.ArgumentTypeError(f"must be between 1 and 9, got {parsed}")
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -221,6 +251,8 @@ Examples:
   %(prog)s /var/log/myapp -d 7         # Compress files older than 7 days
   %(prog)s /var/log/myapp --dry-run    # Show what would be compressed
   %(prog)s /var/log/myapp -r           # Include subdirectories
+  %(prog)s /var/log/myapp -p '*.log'   # Only files matching the pattern
+  %(prog)s /var/log/myapp -c 1         # Fastest compression
         """,
     )
     parser.add_argument(
@@ -237,6 +269,17 @@ Examples:
         "-r", "--recursive",
         action="store_true",
         help="Process subdirectories recursively",
+    )
+    parser.add_argument(
+        "-p", "--pattern",
+        default="*",
+        help="Glob pattern selecting which files to consider (default: '*')",
+    )
+    parser.add_argument(
+        "-c", "--compresslevel",
+        type=compression_level,
+        default=9,
+        help="gzip compression level, 1=fastest to 9=best (default: 9)",
     )
     parser.add_argument(
         "-n", "--dry-run",
@@ -276,6 +319,8 @@ def main() -> int:
         days=args.days,
         dry_run=args.dry_run,
         recursive=args.recursive,
+        pattern=args.pattern,
+        compresslevel=args.compresslevel,
     )
 
     logging.info(f"Completed: {stats}")

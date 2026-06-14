@@ -42,6 +42,12 @@ python file_manager.py /var/log/myapp --dry-run
 # Include subdirectories
 python file_manager.py /var/log/myapp -r
 
+# Only compress files matching a glob pattern
+python file_manager.py /var/log/myapp -p '*.log'
+
+# Use the fastest compression level (1) instead of best (9)
+python file_manager.py /var/log/myapp -c 1
+
 # Verbose output with log file
 python file_manager.py /var/log/myapp -v -l /var/log/file_manager.log
 ```
@@ -53,6 +59,8 @@ python file_manager.py /var/log/myapp -v -l /var/log/file_manager.log
 | `directory` | Directory to scan for files (required) |
 | `-d`, `--days` | Compress files older than this many days (default: 5) |
 | `-r`, `--recursive` | Process subdirectories recursively |
+| `-p`, `--pattern` | Glob pattern selecting which files to consider (default: `*`) |
+| `-c`, `--compresslevel` | gzip compression level, 1=fastest to 9=best (default: 9) |
 | `-n`, `--dry-run` | Show what would be done without making changes |
 | `-l`, `--log-file` | Path to log file (default: console only) |
 | `-v`, `--verbose` | Enable verbose/debug output |
